@@ -1,0 +1,188 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String            @id @default(uuid())
+  email            String            @unique
+  passwordHash     String
+  name             String
+  avatarUrl        String?
+  subscriptionTier String            @default("FREE")
+  twoFaSecret      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  apiKeys          ApiKey[]
+  linkedBanks      LinkedBank[]
+  strategies       Strategy[]
+  trades           Trade[]
+  marketAlerts     MarketAlert[]
+  activities       AccountActivity[]
+  snapshots        PortfolioSnapshot[]
+}
+
+model ApiKey {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchange        String
+  keyEncrypted    String
+  secretEncrypted String
+  label           String
+  isActive        Boolean  @default(true)
+  lastUsedAt      DateTime?
+  createdAt       DateTime @default(now())
+  @@index([userId])
+}
+
+model LinkedBank {
+  id               String  @id @default(uuid())
+  userId           String
+  user             User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institutionName  String
+  accountMask      String
+  plaidAccessToken String?
+  isVerified       Boolean @default(false)
+  createdAt        DateTime @default(now())
+  @@index([userId])
+}
+
+model Strategy {
+  id           String          @id @default(uuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  type         StrategyType
+  status       StrategyStatus  @default(INACTIVE)
+  parameters   Json
+  assetClass   String
+  ticker       String
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  trades       Trade[]
+  backtests    BacktestResult[]
+  @@index([userId])
+}
+
+enum StrategyType {
+  TREND_FOLLOWING
+  VOLATILITY_BREAKOUT
+  MEAN_REVERSION
+  ARBITRAGE
+  GRID_TRADING
+}
+
+enum StrategyStatus {
+  ACTIVE
+  INACTIVE
+  BACKTEST
+}
+
+model Trade {
+  id         String      @id @default(uuid())
+  strategyId String
+  strategy   Strategy    @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker     String
+  side       TradeSide
+  entryPrice Float
+  exitPrice  Float?
+  qty        Float
+  pnl        Float?
+  status     TradeStatus @default(OPEN)
+  openedAt   DateTime    @default(now())
+  closedAt   DateTime?
+  @@index([strategyId])
+  @@index([userId])
+}
+
+enum TradeSide {
+  LONG
+  SHORT
+}
+
+enum TradeStatus {
+  OPEN
+  CLOSED
+}
+
+model BacktestResult {
+  id          String   @id @default(uuid())
+  strategyId  String
+  strategy    Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  startDate   DateTime
+  endDate     DateTime
+  totalProfit Float
+  drawdownPct Float
+  sharpeRatio Float
+  winRate     Float
+  totalTrades Int
+  equityCurve Json
+  createdAt   DateTime @default(now())
+  @@index([strategyId])
+}
+
+model MarketAlert {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker      String
+  condition   String
+  threshold   Float
+  isTriggered Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  @@index([userId])
+}
+
+model AccountActivity {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        ActivityType
+  amount      Float?
+  description String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  @@index([userId])
+  @@index([createdAt])
+}
+
+enum ActivityType {
+  DEPOSIT
+  WITHDRAWAL
+  API_ROTATE
+  ORDER_EXEC
+  SUB_RENEW
+}
+
+model PortfolioSnapshot {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance       Float
+  equity        Float
+  availableCash Float
+  snapshotAt    DateTime @default(now())
+  @@index([userId])
+  @@index([snapshotAt])
+}
+
+model OHLCVData {
+  id        String   @id @default(uuid())
+  ticker    String
+  exchange  String
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Float
+  timestamp DateTime
+  @@index([ticker, timestamp])
+  @@index([exchange])
+}
