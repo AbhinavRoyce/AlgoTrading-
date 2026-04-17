@@ -52,4 +52,5 @@ algo-trading/
 | Auth | JWT + Refresh Tokens + TOTP 2FA |
 | Infra | Docker, Nginx, GitHub Actions |
 
-
+## 📜 License
+MIT
