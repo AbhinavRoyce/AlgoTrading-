@@ -1,3 +1,6 @@
+const axios = require('axios');
+
+// ─── Mock ticker data (stocks / crypto / forex) ───────────────────────
 const mockStocks = [
   { symbol: 'AAPL', name: 'Apple Inc.', price: 178.72, change: 2.34, changePercent: 1.33, volume: 54_832_100, high: 179.63, low: 176.21, marketCap: 2_780_000_000_000 },
   { symbol: 'MSFT', name: 'Microsoft Corp.', price: 415.56, change: -1.23, changePercent: -0.30, volume: 22_145_600, high: 418.12, low: 413.89, marketCap: 3_090_000_000_000 },
@@ -28,19 +31,128 @@ async function getMarketData(assetClass) {
   }
 }
 
-async function getOHLCVData(ticker, _interval) {
+// ─── Binance REST kline helpers ───────────────────────────────────────
+
+const BINANCE_REST = 'https://api.binance.com/api/v3';
+
+// Map frontend symbol names to Binance trading pairs
+const SYMBOL_MAP = {
+  'BTC/USD': 'BTCUSDT',
+  'ETH/USD': 'ETHUSDT',
+  'SOL/USD': 'SOLUSDT',
+  'BTCUSDT': 'BTCUSDT',
+  'ETHUSDT': 'ETHUSDT',
+  'SOLUSDT': 'SOLUSDT',
+};
+
+// Valid Binance kline intervals
+const VALID_INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M'];
+
+function isCryptoSymbol(symbol) {
+  return !!SYMBOL_MAP[symbol] || symbol.endsWith('USDT');
+}
+
+function toBinanceSymbol(symbol) {
+  return SYMBOL_MAP[symbol] || symbol.toUpperCase();
+}
+
+/**
+ * Transform a single Binance kline array into a structured candle object.
+ * Binance kline format: [openTime, open, high, low, close, volume, closeTime, ...]
+ */
+function mapBinanceKline(k) {
+  return {
+    time: Math.floor(k[0] / 1000), // UNIX seconds for lightweight-charts
+    open: parseFloat(k[1]),
+    high: parseFloat(k[2]),
+    low: parseFloat(k[3]),
+    close: parseFloat(k[4]),
+    volume: parseFloat(k[5]),
+  };
+}
+
+/**
+ * Fetch historical klines from Binance REST API.
+ * No API key required for public market data.
+ */
+async function fetchBinanceKlines(symbol, interval = '1h', limit = 500) {
+  const binanceSymbol = toBinanceSymbol(symbol);
+  const safeInterval = VALID_INTERVALS.includes(interval) ? interval : '1h';
+  const safeLimit = Math.min(Math.max(parseInt(limit) || 500, 10), 1000);
+
+  const { data } = await axios.get(`${BINANCE_REST}/klines`, {
+    params: { symbol: binanceSymbol, interval: safeInterval, limit: safeLimit },
+    timeout: 10000,
+  });
+
+  return data.map(mapBinanceKline);
+}
+
+// ─── OHLCV data (unified interface) ──────────────────────────────────
+
+/**
+ * Generate mock OHLCV bars for non-crypto symbols.
+ * Produces realistic-looking price action with trend and volatility.
+ */
+function generateMockOHLCV(ticker, interval) {
   const bars = [];
   const now = Date.now();
   const basePrice = ticker.includes('BTC') ? 65000 : ticker.includes('ETH') ? 3400 : 175;
-  for (let i = 200; i >= 0; i--) {
-    const time = now - i * 86400000;
+
+  // Determine bar spacing in ms based on interval
+  const spacingMap = { '1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000, '4h': 14400000, '1d': 86400000, '1w': 604800000 };
+  const spacing = spacingMap[interval] || 86400000;
+  const count = 500;
+
+  for (let i = count; i >= 0; i--) {
+    const time = now - i * spacing;
     const v = basePrice * 0.02;
-    const open = basePrice + (Math.random() - 0.5) * v * 2 + (200 - i) * (basePrice * 0.0005);
+    const open = basePrice + (Math.random() - 0.5) * v * 2 + (count - i) * (basePrice * 0.0005);
     const close = open + (Math.random() - 0.48) * v;
-    bars.push({ time: Math.floor(time / 1000), open: +open.toFixed(2), high: +(Math.max(open, close) + Math.random() * v * 0.5).toFixed(2), low: +(Math.min(open, close) - Math.random() * v * 0.5).toFixed(2), close: +close.toFixed(2), volume: Math.floor(Math.random() * 50_000_000) + 10_000_000 });
+    bars.push({
+      time: Math.floor(time / 1000),
+      open: +open.toFixed(2),
+      high: +(Math.max(open, close) + Math.random() * v * 0.5).toFixed(2),
+      low: +(Math.min(open, close) - Math.random() * v * 0.5).toFixed(2),
+      close: +close.toFixed(2),
+      volume: Math.floor(Math.random() * 50_000_000) + 10_000_000,
+    });
   }
   return bars;
 }
+
+/**
+ * Get OHLCV data — tries Binance for crypto, falls back to mock for stocks/forex.
+ */
+async function getOHLCVData(ticker, interval = '1d') {
+  if (isCryptoSymbol(ticker)) {
+    try {
+      return await fetchBinanceKlines(ticker, interval);
+    } catch (err) {
+      console.error(`[MarketData] Binance fetch failed for ${ticker}: ${err.message}`);
+      // Fall through to mock data
+    }
+  }
+  return generateMockOHLCV(ticker, interval);
+}
+
+// ─── Candles endpoint (new, dedicated) ────────────────────────────────
+
+/**
+ * Fetch candle data with metadata. Used by the new /candles/:symbol route.
+ */
+async function getCandleData(symbol, interval = '1h', limit = 500) {
+  const candles = await getOHLCVData(symbol, interval);
+  return {
+    symbol,
+    interval,
+    source: isCryptoSymbol(symbol) ? 'binance' : 'mock',
+    count: candles.length,
+    candles,
+  };
+}
+
+// ─── News ─────────────────────────────────────────────────────────────
 
 async function getMarketNews() {
   return [
@@ -52,4 +164,4 @@ async function getMarketNews() {
   ];
 }
 
-module.exports = { getMarketData, getOHLCVData, getMarketNews };
+module.exports = { getMarketData, getOHLCVData, getMarketNews, getCandleData, isCryptoSymbol, toBinanceSymbol, VALID_INTERVALS };
