@@ -14,3 +14,17 @@ export function getSocket() {
 export function subscribeTicker(ticker) { getSocket().emit('subscribe:ticker', ticker); }
 export function unsubscribeTicker(ticker) { getSocket().emit('unsubscribe:ticker', ticker); }
 export function subscribePortfolio(userId) { getSocket().emit('subscribe:portfolio', userId); }
+
+// ─── Candle subscription helpers (for live chart updates) ─────────────
+export function subscribeCandles(symbol, interval) {
+  getSocket().emit('subscribe:candles', { symbol, interval });
+}
+
+export function unsubscribeCandles(symbol, interval) {
+  getSocket().emit('unsubscribe:candles', { symbol, interval });
+}
+
+export function onCandleUpdate(callback) {
+  getSocket().on('candle:update', callback);
+  return () => getSocket().off('candle:update', callback);
+}

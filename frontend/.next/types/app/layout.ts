@@ -1,4 +1,4 @@
-// File: /Users/abhinavroyce/Documents/Claude/Algo Trading/frontend/src/app/layout.js
+// File: /Users/abhinavroyce/Documents/Projects/Algo Trading/frontend/src/app/layout.js
 import * as entry from '../../../src/app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

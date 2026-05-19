@@ -1,6 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
+import IndicatorPanel from '@/components/charts/IndicatorPanel';
+import IntervalSelector from '@/components/charts/IntervalSelector';
+import { subscribeCandles, unsubscribeCandles, onCandleUpdate } from '@/lib/socket';
+
+// Dynamic import to avoid SSR issues with lightweight-charts
+const TradingChart = dynamic(() => import('@/components/charts/TradingChart'), { ssr: false });
 
 const assetClasses = ['Stocks', 'Crypto', 'Forex', 'Options', 'Commodities'];
 const mockTickers = {
@@ -38,41 +45,152 @@ const openPositions = [
   { ticker: 'AAPL', side: 'LONG', qty: 15, pnl: 50.70, pnlPct: 1.93 },
 ];
 
+// Crypto symbols that support live Binance data
+const CRYPTO_SYMBOLS = new Set(['BTC/USD', 'ETH/USD', 'SOL/USD']);
+
 export default function MarketsPage() {
   const [activeTab, setActiveTab] = useState('Stocks');
   const [selectedTicker, setSelectedTicker] = useState('AAPL');
+  const [interval, setInterval] = useState('1h');
+  const [candles, setCandles] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [activeIndicators, setActiveIndicators] = useState([
+    { id: 'volume' },
+    { id: 'sma', period: 20, color: '#f59e0b' },
+  ]);
+  const chartRef = useRef(null);
+  const prevSubRef = useRef(null);
   const tickers = mockTickers[activeTab] || [];
 
+  const isCrypto = CRYPTO_SYMBOLS.has(selectedTicker);
+
+  // ─── Fetch historical candles ─────────────────────────────────
+  const fetchCandles = useCallback(async (symbol, intv) => {
+    setLoading(true);
+    try {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+      const res = await fetch(`${API_URL}/markets/candles/${encodeURIComponent(symbol)}?interval=${intv}&limit=500`);
+      if (!res.ok) throw new Error('Fetch failed');
+      const data = await res.json();
+      setCandles(data.candles || []);
+    } catch (err) {
+      console.error('[Markets] Failed to fetch candles:', err);
+      // Generate client-side fallback data
+      setCandles(generateFallbackCandles(symbol));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ─── Subscribe to live updates for crypto ─────────────────────
+  useEffect(() => {
+    // Unsubscribe from previous
+    if (prevSubRef.current) {
+      unsubscribeCandles(prevSubRef.current.symbol, prevSubRef.current.interval);
+    }
+
+    fetchCandles(selectedTicker, interval);
+
+    if (isCrypto) {
+      subscribeCandles(selectedTicker, interval);
+      prevSubRef.current = { symbol: selectedTicker, interval };
+
+      const cleanup = onCandleUpdate((data) => {
+        if (data.symbol === selectedTicker && data.interval === interval) {
+          // Update the latest candle or append
+          setCandles((prev) => {
+            if (!prev.length) return prev;
+            const last = prev[prev.length - 1];
+            if (data.candle.time === last.time) {
+              // Update in-place
+              return [...prev.slice(0, -1), data.candle];
+            } else if (data.candle.time > last.time) {
+              // New candle
+              return [...prev, data.candle];
+            }
+            return prev;
+          });
+        }
+      });
+
+      return cleanup;
+    } else {
+      prevSubRef.current = null;
+    }
+  }, [selectedTicker, interval, isCrypto, fetchCandles]);
+
+  // ─── Indicator management ─────────────────────────────────────
+  const handleToggleIndicator = useCallback((config) => {
+    setActiveIndicators((prev) => {
+      const exists = prev.find((i) => i.id === config.id);
+      if (exists) return prev.filter((i) => i.id !== config.id);
+      return [...prev, config];
+    });
+  }, []);
+
+  const handleUpdateParams = useCallback((id, params) => {
+    setActiveIndicators((prev) =>
+      prev.map((i) => (i.id === id ? { ...i, ...params } : i))
+    );
+  }, []);
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in" id="markets-page">
+      {/* ─── Asset class tabs ──────────────────────────────────── */}
       <div className="flex items-center gap-1 border-b border-border pb-0">
-        {assetClasses.map(tab => <button key={tab} onClick={() => setActiveTab(tab)} className={activeTab === tab ? 'tab-btn-active' : 'tab-btn'}>{tab}</button>)}
+        {assetClasses.map(tab => <button key={tab} onClick={() => { setActiveTab(tab); const first = (mockTickers[tab] || [])[0]; if (first) setSelectedTicker(first.symbol); }} className={activeTab === tab ? 'tab-btn-active' : 'tab-btn'}>{tab}</button>)}
       </div>
+
       <div className="grid grid-cols-12 gap-6">
+        {/* ─── Main content (9 cols) ─────────────────────────── */}
         <div className="col-span-9 space-y-6">
-          <div className="glass-card p-0 overflow-hidden">
+          {/* Chart card */}
+          <div className="glass-card p-0 overflow-hidden" id="chart-container">
+            {/* Chart header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div className="flex items-center gap-4">
-                <h2 className="font-semibold text-text-primary">{selectedTicker}</h2>
+                <h2 className="font-semibold text-text-primary" id="selected-symbol">{selectedTicker}</h2>
                 {tickers.filter(t => t.symbol === selectedTicker).map(t => (
                   <div key={t.symbol} className="flex items-center gap-3">
                     <span className="font-mono text-lg font-bold">${t.price > 1000 ? t.price.toLocaleString() : t.price}</span>
                     <span className={`font-mono text-sm ${t.change >= 0 ? 'price-up' : 'price-down'}`}>{t.change >= 0 ? '+' : ''}{t.change} ({t.changePercent >= 0 ? '+' : ''}{t.changePercent}%)</span>
                   </div>
                 ))}
+                {isCrypto && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="pulse-dot" />
+                    <span className="text-[10px] text-positive font-medium uppercase tracking-wider">Live</span>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">{['1D','1W','1M','3M','1Y','ALL'].map(tf => <button key={tf} className={`px-2.5 py-1 text-xs font-medium rounded ${tf === '1D' ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'}`}>{tf}</button>)}</div>
+              <IntervalSelector activeInterval={interval} onChange={setInterval} />
             </div>
-            <div className="h-[380px] bg-background/40 flex items-center justify-center relative overflow-hidden">
-              <svg className="w-full h-full" viewBox="0 0 800 380" preserveAspectRatio="none">
-                <defs><linearGradient id="chartGrad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stopColor="#3b82f6" stopOpacity="0.3" /><stop offset="100%" stopColor="#3b82f6" stopOpacity="0" /></linearGradient></defs>
-                <path d="M0,280 C40,260 80,240 120,250 C160,260 200,200 240,180 C280,160 320,190 360,170 C400,150 440,120 480,140 C520,160 560,100 600,80 C640,60 680,90 720,70 C760,50 800,30 800,30 L800,380 L0,380 Z" fill="url(#chartGrad)" />
-                <path d="M0,280 C40,260 80,240 120,250 C160,260 200,200 240,180 C280,160 320,190 360,170 C400,150 440,120 480,140 C520,160 560,100 600,80 C640,60 680,90 720,70 C760,50 800,30 800,30" stroke="#3b82f6" strokeWidth="2" fill="none" />
-                <circle cx="240" cy="180" r="4" fill="#22c55e" /><circle cx="480" cy="140" r="4" fill="#ef4444" /><circle cx="680" cy="90" r="4" fill="#22c55e" />
-              </svg>
+
+            {/* Indicator panel */}
+            <div className="px-4 py-2 border-b border-border/50 bg-background/30">
+              <IndicatorPanel
+                activeIndicators={activeIndicators}
+                onToggle={handleToggleIndicator}
+                onUpdateParams={handleUpdateParams}
+              />
+            </div>
+
+            {/* Chart */}
+            <div className="bg-background/40 relative" ref={chartRef}>
+              {loading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/60 z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-text-muted">Loading chart data...</span>
+                  </div>
+                </div>
+              )}
+              <TradingChart candles={candles} indicators={activeIndicators} height={440} />
             </div>
           </div>
-          <div className="glass-card overflow-hidden">
+
+          {/* Market Watch table */}
+          <div className="glass-card overflow-hidden" id="market-watch">
             <div className="px-4 py-3 border-b border-border flex items-center justify-between"><h3 className="section-title text-sm">Market Watch</h3><span className="text-xs text-text-muted">{tickers.length} instruments</span></div>
             <table className="w-full">
               <thead><tr className="text-[11px] uppercase tracking-wider text-text-muted border-b border-border"><th className="text-left px-4 py-2.5 font-medium">Symbol</th><th className="text-left px-4 py-2.5 font-medium">Name</th><th className="text-right px-4 py-2.5 font-medium">Price</th><th className="text-right px-4 py-2.5 font-medium">Change</th><th className="text-right px-4 py-2.5 font-medium">% Change</th><th className="text-right px-4 py-2.5 font-medium">Volume</th></tr></thead>
@@ -89,6 +207,8 @@ export default function MarketsPage() {
             </table>
           </div>
         </div>
+
+        {/* ─── Sidebar (3 cols) ──────────────────────────────── */}
         <div className="col-span-3 space-y-4">
           <div className="glass-card p-4 space-y-3">
             <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Account Overview</h3>
@@ -118,4 +238,19 @@ export default function MarketsPage() {
       </div>
     </div>
   );
+}
+
+// ─── Fallback candle generator (when backend is unavailable) ──────────
+function generateFallbackCandles(symbol) {
+  const bars = [];
+  const now = Date.now();
+  const base = symbol.includes('BTC') ? 65000 : symbol.includes('ETH') ? 3400 : symbol.includes('SOL') ? 145 : 175;
+  for (let i = 300; i >= 0; i--) {
+    const time = now - i * 3600000;
+    const v = base * 0.015;
+    const open = base + (Math.random() - 0.5) * v * 2 + (300 - i) * (base * 0.0003);
+    const close = open + (Math.random() - 0.48) * v;
+    bars.push({ time: Math.floor(time / 1000), open: +open.toFixed(2), high: +(Math.max(open, close) + Math.random() * v * 0.5).toFixed(2), low: +(Math.min(open, close) - Math.random() * v * 0.5).toFixed(2), close: +close.toFixed(2), volume: Math.floor(Math.random() * 50000000) + 10000000 });
+  }
+  return bars;
 }
