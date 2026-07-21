@@ -32,7 +32,7 @@ router.get('/performance', authMiddleware, async (req, res) => {
   try {
     const trades = await prisma.trade.findMany({ where: { userId: req.userId, status: 'CLOSED' }, select: { pnl: true } });
     const totalPnl = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-    const wins = trades.filter(t => (t.pnl || 0) > 0).length;
+    const  = trades.filter(t => (t.pnl || 0) > 0).length;
     const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0;
     const latestSnapshot = await prisma.portfolioSnapshot.findFirst({ where: { userId: req.userId }, orderBy: { snapshotAt: 'desc' } });
     res.json({ totalPnl, totalTrades: trades.length, winRate, balance: latestSnapshot?.balance || 0, equity: latestSnapshot?.equity || 0, availableCash: latestSnapshot?.availableCash || 0 });
