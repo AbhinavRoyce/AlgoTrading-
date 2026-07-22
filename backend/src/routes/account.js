@@ -3,7 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const { authMiddleware } = require('../middleware/auth.middleware');
 
 const router = Router();
-const prisma = new ();
+const prisma = new PrismaClient();
 
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
