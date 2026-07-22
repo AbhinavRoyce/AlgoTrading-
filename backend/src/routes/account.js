@@ -16,7 +16,7 @@ router.get('/activity', authMiddleware, async (req, res) => {
   try {
     const activities = await prisma.accountActivity.findMany({ where: { userId: req.userId }, orderBy: { createdAt: 'desc' }, take: 50 });
     res.json(activities);
-  } catch { res.status(500).json({ error: ' to fetch activities' }); }
+  } catch { res.status(500).json({ error: 'Failed to fetch activities' }); }
 });
 
 router.get('/snapshots', authMiddleware, async (req, res) => {
