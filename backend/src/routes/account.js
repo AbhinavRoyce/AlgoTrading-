@@ -5,7 +5,7 @@ const { authMiddleware } = require('../middleware/auth.middleware');
 const router = Router();
 const prisma = new PrismaClient();
 
-router.get('/profile', authMiddleware, async (req, res) => {
+router.get('/profile', , async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { id: true, email: true, name: true, avatarUrl: true, subscriptionTier: true, createdAt: true } });
     res.json(user);
