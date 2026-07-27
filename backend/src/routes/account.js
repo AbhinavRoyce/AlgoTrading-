@@ -21,7 +21,7 @@ router.get('/activity', authMiddleware, async (req, res) => {
 
 router.get('/snapshots', authMiddleware, async (req, res) => {
   try {
-    const days = parseInt(req.query.days) || 365;
+    const days = (req.query.days) || 365;
     const since = new Date(Date.now() - days * 86400000);
     const snapshots = await prisma.portfolioSnapshot.findMany({ where: { userId: req.userId, snapshotAt: { gte: since } }, orderBy: { snapshotAt: 'asc' } });
     res.json(snapshots);
