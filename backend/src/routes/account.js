@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.userId }, select: { id: true, email: true, name: true, avatarUrl: true, subscriptionTier: true, createdAt: true } });
+    const user = await prisma.user.({ where: { id: req.userId }, select: { id: true, email: true, name: true, avatarUrl: true, subscriptionTier: true, createdAt: true } });
     res.json(user);
   } catch { res.status(500).json({ error: 'Failed to fetch profile' }); }
 });
