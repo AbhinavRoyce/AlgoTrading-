@@ -45,8 +45,7 @@ const openPositions = [
   { ticker: 'AAPL', side: 'LONG', qty: 15, pnl: 50.70, pnlPct: 1.93 },
 ];
 
-// Crypto symbols that support live Binance data
-const CRYPTO_SYMBOLS = new Set(['BTC/USD', 'ETH/USD', 'SOL/USD']);
+// All symbols now receive live candle updates (crypto = Binance, others = mock simulator)
 
 export default function MarketsPage() {
   const [activeTab, setActiveTab] = useState('Stocks');
@@ -62,7 +61,7 @@ export default function MarketsPage() {
   const prevSubRef = useRef(null);
   const tickers = mockTickers[activeTab] || [];
 
-  const isCrypto = CRYPTO_SYMBOLS.has(selectedTicker);
+  const isCrypto = ['BTC/USD', 'ETH/USD', 'SOL/USD'].includes(selectedTicker);
 
   // ─── Fetch historical candles ─────────────────────────────────
   const fetchCandles = useCallback(async (symbol, intv) => {
@@ -82,42 +81,36 @@ export default function MarketsPage() {
     }
   }, []);
 
-  // ─── Subscribe to live updates for crypto ─────────────────────
+  // ─── Subscribe to live candle updates for ALL symbols ───────────
   useEffect(() => {
-    // Unsubscribe from previous
+    // Unsubscribe from previous symbol/interval
     if (prevSubRef.current) {
       unsubscribeCandles(prevSubRef.current.symbol, prevSubRef.current.interval);
     }
 
     fetchCandles(selectedTicker, interval);
 
-    if (isCrypto) {
-      subscribeCandles(selectedTicker, interval);
-      prevSubRef.current = { symbol: selectedTicker, interval };
+    // Subscribe every symbol — crypto gets real Binance data, stocks get mock simulator
+    subscribeCandles(selectedTicker, interval);
+    prevSubRef.current = { symbol: selectedTicker, interval };
 
-      const cleanup = onCandleUpdate((data) => {
-        if (data.symbol === selectedTicker && data.interval === interval) {
-          // Update the latest candle or append
-          setCandles((prev) => {
-            if (!prev.length) return prev;
-            const last = prev[prev.length - 1];
-            if (data.candle.time === last.time) {
-              // Update in-place
-              return [...prev.slice(0, -1), data.candle];
-            } else if (data.candle.time > last.time) {
-              // New candle
-              return [...prev, data.candle];
-            }
-            return prev;
-          });
-        }
-      });
+    const cleanup = onCandleUpdate((data) => {
+      if (data.symbol === selectedTicker && data.interval === interval) {
+        setCandles((prev) => {
+          if (!prev.length) return prev;
+          const last = prev[prev.length - 1];
+          if (data.candle.time === last.time) {
+            return [...prev.slice(0, -1), data.candle]; // update last candle in-place
+          } else if (data.candle.time > last.time) {
+            return [...prev, data.candle]; // append new candle
+          }
+          return prev;
+        });
+      }
+    });
 
-      return cleanup;
-    } else {
-      prevSubRef.current = null;
-    }
-  }, [selectedTicker, interval, isCrypto, fetchCandles]);
+    return cleanup;
+  }, [selectedTicker, interval, fetchCandles]);
 
   // ─── Indicator management ─────────────────────────────────────
   const handleToggleIndicator = useCallback((config) => {
@@ -156,12 +149,12 @@ export default function MarketsPage() {
                     <span className={`font-mono text-sm ${t.change >= 0 ? 'price-up' : 'price-down'}`}>{t.change >= 0 ? '+' : ''}{t.change} ({t.changePercent >= 0 ? '+' : ''}{t.changePercent}%)</span>
                   </div>
                 ))}
-                {isCrypto && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="pulse-dot" />
-                    <span className="text-[10px] text-positive font-medium uppercase tracking-wider">Live</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="pulse-dot" />
+                  <span className="text-[10px] text-positive font-medium uppercase tracking-wider">
+                    {isCrypto ? 'Live · Binance' : 'Live · Simulated'}
+                  </span>
+                </div>
               </div>
               <IntervalSelector activeInterval={interval} onChange={setInterval} />
             </div>
